@@ -1,195 +1,212 @@
 # AWS EC2 Deployment Guide for Kisan Voice Assistant
 
-## Step 1: Launch EC2 Instance
+## Step 1: Configure Security Group
+1. Go to EC2 Console > Security Groups
+2. Create or edit your security group with these rules:
 
-1. Go to AWS EC2 Console
-2. Launch a new EC2 instance:
-   - Choose Ubuntu Server 22.04 LTS
-   - Select t2.micro (free tier) or t2.small
-   - Create or select a key pair for SSH access
-   - Configure security group:
-     ```
-     HTTP (80)   : 0.0.0.0/0
-     HTTPS (443) : 0.0.0.0/0
-     SSH (22)    : Your IP
-     Custom TCP  : 5000 (Application port)
-     ```
-
-## Step 2: Connect to EC2 Instance
-```bash
-# Use your .pem file
-chmod 400 your-key.pem
-ssh -i your-key.pem ubuntu@your-ec2-public-ip
+Inbound Rules:
+```
+Type        Port    Source          Description
+SSH         22      Your IP         SSH access
+HTTP        80      0.0.0.0/0       Web access
+HTTPS       443     0.0.0.0/0       SSL access
+Custom TCP  5000    0.0.0.0/0       Application port
 ```
 
-## Step 3: Install Dependencies
+Outbound Rules:
+```
+Type        Port    Destination     Description
+All traffic All     0.0.0.0/0       Allow all outbound traffic
+```
+
+Note: Make sure to apply this security group to your EC2 instance.
+
+## Step 2: Install Dependencies
 ```bash
-# Update system
-sudo apt update
-sudo apt upgrade -y
+# Update system and install dependencies
+sudo yum update -y
+sudo yum install -y python3 python3-pip nginx git
 
-# Install Python and pip
-sudo apt install python3-pip python3-dev build-essential libssl-dev libffi-dev python3-setuptools python3-venv nginx -y
-
-# Install MySQL
-sudo apt install mysql-server -y
-sudo systemctl start mysql
-sudo systemctl enable mysql
+# Install MySQL (MariaDB)
+sudo yum install -y mariadb105-server
+sudo systemctl start mariadb
+sudo systemctl enable mariadb
 
 # Secure MySQL installation
 sudo mysql_secure_installation
+# Answer the prompts:
+# - Enter current root password (just press Enter as it's not set)
+# - Set root password: Y
+# - Remove anonymous users: Y
+# - Disallow root login remotely: Y
+# - Remove test database: Y
+# - Reload privilege tables: Y
 ```
 
-## Step 4: Set Up MySQL Database
+## Step 3: Set Up MySQL Database
 ```bash
-sudo mysql
-```
-```sql
+# Connect to MySQL
+sudo mysql -u root -p
+# Enter the password you set during mysql_secure_installation
+
+# In MySQL prompt, run:
 CREATE DATABASE farmers_database;
-CREATE USER 'kisan_user'@'localhost' IDENTIFIED BY 'your_password';
+CREATE USER 'kisan_user'@'localhost' IDENTIFIED BY 'QWer12@*';
 GRANT ALL PRIVILEGES ON farmers_database.* TO 'kisan_user'@'localhost';
 FLUSH PRIVILEGES;
 EXIT;
 ```
 
-## Step 5: Clone and Set Up Application
+## Step 4: Clone Repository
 ```bash
-# Clone repository
 git clone https://github.com/Rahuwale123/kisan--ai.git
 cd kisan--ai
+```
 
-# Create virtual environment
+## Step 5: Set Up Python Environment
+```bash
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
 
-# Create .env file
+# Install MySQL connector if not in requirements.txt
+pip install mysql-connector-python
+```
+
+## Step 6: Configure Environment Variables
+```bash
+# Create and edit .env file
 nano .env
 ```
 
-Add these environment variables to .env:
+Add these environment variables:
 ```
+# Database configuration
 MYSQL_HOST=localhost
 MYSQL_USER=kisan_user
-MYSQL_PASSWORD=your_password
+MYSQL_PASSWORD=QWer12@*
 MYSQL_DATABASE=farmers_database
-TWILIO_ACCOUNT_SID=your_sid
-TWILIO_AUTH_TOKEN=your_token
-TWILIO_PHONE_NUMBER=your_number
-GEMINI_API_KEY=your_key
-WEBHOOK_BASE_URL=your_domain_or_ip
+
+# Twilio configuration
+TWILIO_ACCOUNT_SID=AC610e5206c0153bcb5833955b4a9d13b1
+TWILIO_AUTH_TOKEN=9c1ff3c6501227937bf9c6cdf624db6a
+TWILIO_PHONE_NUMBER=+16609003015
+GEMINI_API_KEY=AIzaSyDJ6hYHy5RZpdaeT3WCGGKdk_nvoH5VoRs
+DEBUG=1
+BASE_URL=http://54.92.244.26
+WEBHOOK_BASE_URL=http://54.92.244.26
 ```
 
-## Step 6: Set Up Gunicorn
+## Step 7: Create Service File
 ```bash
-# Test Gunicorn
-gunicorn --bind 0.0.0.0:5000 run:app
-
-# Create systemd service
-sudo nano /etc/systemd/system/kisan.service
+sudo nano /etc/systemd/system/farming-assistant.service
 ```
 
 Add this content:
 ```ini
 [Unit]
-Description=Kisan Voice Assistant
-After=network.target
+Description=Farming Assistant Service
+After=network.target mariadb.service
 
 [Service]
-User=ubuntu
-WorkingDirectory=/home/ubuntu/kisan--ai
-Environment="PATH=/home/ubuntu/kisan--ai/venv/bin"
-ExecStart=/home/ubuntu/kisan--ai/venv/bin/gunicorn --workers 4 --bind 0.0.0.0:5000 run:app
+User=ec2-user
+WorkingDirectory=/home/ec2-user/kisan--ai
+Environment="PATH=/home/ec2-user/kisan--ai/venv/bin"
+ExecStart=/home/ec2-user/kisan--ai/venv/bin/gunicorn -w 4 -b 0.0.0.0:5000 run:app
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Start the service:
+## Step 8: Configure Nginx
 ```bash
-sudo systemctl start kisan
-sudo systemctl enable kisan
-```
-
-## Step 7: Set Up Nginx
-```bash
-# Create Nginx config
-sudo nano /etc/nginx/sites-available/kisan
+sudo nano /etc/nginx/conf.d/farming-assistant.conf
 ```
 
 Add this content:
 ```nginx
 server {
     listen 80;
-    server_name your_domain_or_ip;
+    server_name 54.92.244.26;
 
     location / {
         proxy_pass http://localhost:5000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
-Enable the site:
+## Step 9: Start Services
 ```bash
-sudo ln -s /etc/nginx/sites-available/kisan /etc/nginx/sites-enabled
+# Make sure MySQL is running
+sudo systemctl status mariadb
+sudo systemctl restart mariadb
+
+# Enable and start the application service
+sudo systemctl daemon-reload
+sudo systemctl enable farming-assistant
+sudo systemctl start farming-assistant
+
+# Check application status
+sudo systemctl status farming-assistant
+
+# Test and restart Nginx
 sudo nginx -t
 sudo systemctl restart nginx
 ```
 
-## Step 8: SSL Certificate (Optional but Recommended)
+## Step 10: Test the Application
 ```bash
-# Install Certbot
-sudo apt install certbot python3-certbot-nginx -y
+# Test database connection
+mysql -u kisan_user -p farmers_database -e "SELECT 1;"
 
-# Get SSL certificate
-sudo certbot --nginx -d your_domain
+# Test the application
+curl -X POST "http://54.92.244.26/initiate-call" \
+-H "Content-Type: application/json" \
+-d '{"phone_number": "+918208594908"}'
 ```
 
-## Step 9: Update Twilio Webhook URLs
-Update your Twilio webhook URLs to point to:
-```
-https://your_domain/voice
-https://your_domain/voice/status
-```
-
-## Monitoring and Maintenance
-
-### View Logs
+## Monitoring Commands
 ```bash
-# Application logs
-sudo journalctl -u kisan.service -f
+# Check application logs
+sudo journalctl -u farming-assistant -f
 
-# Nginx logs
-sudo tail -f /var/log/nginx/access.log
+# Check Nginx logs
 sudo tail -f /var/log/nginx/error.log
+
+# Check MySQL logs
+sudo tail -f /var/log/mysqld.log
+
+# Check service status
+sudo systemctl status farming-assistant
+sudo systemctl status nginx
+sudo systemctl status mariadb
 ```
 
-### Restart Services
+## Restart Commands
 ```bash
 # Restart application
-sudo systemctl restart kisan
+sudo systemctl restart farming-assistant
+
+# Restart MySQL
+sudo systemctl restart mariadb
 
 # Restart Nginx
 sudo systemctl restart nginx
+
+# Restart all services
+sudo systemctl restart mariadb farming-assistant nginx
 ```
 
-### Database Backup
+## Database Backup (Optional)
 ```bash
-# Backup
+# Backup database
 mysqldump -u kisan_user -p farmers_database > backup.sql
 
-# Restore
+# Restore database if needed
 mysql -u kisan_user -p farmers_database < backup.sql
-```
-
-## Troubleshooting
-1. Check application logs: `sudo journalctl -u kisan.service -f`
-2. Check Nginx logs: `sudo tail -f /var/log/nginx/error.log`
-3. Test MySQL connection: `mysql -u kisan_user -p`
-4. Check service status: `sudo systemctl status kisan`
-5. Verify ports: `sudo netstat -tulpn`
+``` 

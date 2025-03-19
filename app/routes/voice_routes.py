@@ -120,7 +120,7 @@ def handle_call():
             # Set 30 second timeout
             gather = response.gather(
                 input='speech',
-                timeout=30,  # Changed from 5 to 30 seconds
+                timeout=30,  
                 speech_timeout='auto',
                 language=language
             )
@@ -148,28 +148,32 @@ def handle_call():
             'ai': ai_response,
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         })
+        # Keep only last 5 exchanges to prevent history from growing too large
+        if len(history) > 5:
+            history = history[-5:]
         cache.set(f'history_{call_sid}', history)
         
         # Create response with 30 second timeout
         response = VoiceResponse()
         gather = response.gather(
             input='speech',
-            timeout=30,  # Changed from 5 to 30 seconds
+            timeout=30,  
             speech_timeout='auto',
             language=language
         )
         
-        # Break response into natural chunks
-        sentences = ai_response.split('।')
+        # Break response into natural chunks and add pauses
+        sentences = re.split('[।?!]', ai_response)
         for sentence in sentences:
             if sentence.strip():
                 gather.say(
                     sentence.strip() + '।', 
                     language='hi-IN', 
-                    
+                    voice='female',
                     prosody={'rate': '90%', 'volume': 'loud'}
                 )
-                gather.pause(length=0.5)
+                # Add natural pauses between sentences
+                gather.pause(length=0.7)
         
         # Add timeout message and hangup
         response.say(
