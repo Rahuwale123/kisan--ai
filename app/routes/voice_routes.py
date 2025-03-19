@@ -329,3 +329,22 @@ def call_status():
     except Exception as e:
         logging.error(f"Error in call status: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)})
+
+@voice_bp.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for AWS load balancer"""
+    try:
+        # Test database connection
+        db = DatabaseManager()
+        db.test_connection()
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'timestamp': datetime.now().isoformat()
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500

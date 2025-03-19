@@ -125,6 +125,20 @@ class DatabaseManager:
             logging.error(f"Error getting farmer data: {str(e)}")
             return None
 
+    def test_connection(self):
+        """Test database connection for health check"""
+        try:
+            connection = self.get_connection()
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+            cursor.close()
+            connection.close()
+            return True
+        except Exception as e:
+            logging.error(f"Database connection test failed: {str(e)}")
+            raise e
+
     def __del__(self):
         """Close database connection"""
         try:

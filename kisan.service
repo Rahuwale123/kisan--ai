@@ -1,0 +1,13 @@
+[Unit]
+Description=Kisan Voice Assistant
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/kisan--ai
+Environment="PATH=/home/ubuntu/kisan--ai/venv/bin"
+ExecStart=/home/ubuntu/kisan--ai/venv/bin/gunicorn --workers 4 --bind 0.0.0.0:5000 run:app
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
